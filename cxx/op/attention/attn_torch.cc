@@ -1,6 +1,7 @@
 #include "utils/torch_utils.cuh"
 #include "params.cuh"
-
+#include "api.cuh"
+#include "cute/tensor.hpp"
 
 torch::Tensor 
 mha_infer(const torch::Tensor&q,    // batch,qo_seqlen,head_num,head_size
@@ -16,7 +17,7 @@ mha_infer(const torch::Tensor&q,    // batch,qo_seqlen,head_num,head_size
 
     // Check Device
     auto dprops  = at::cuda::getCurrentDeviceProperties();
-    bool is_sm80 = (dprops->major == 8 && dprops->minor == 0);
+    bool is_sm80 = (dprops->major == 8);
     TORCH_CHECK(is_sm80, "mha_infer only support sm80");
     CHECK_DEVICE(q);
     CHECK_DEVICE(k);
@@ -42,7 +43,7 @@ mha_infer(const torch::Tensor&q,    // batch,qo_seqlen,head_num,head_size
     params.batch     = batch;
     params.qo_seqlen  = qo_seqlen;
     params.head_num   = head_num;
-    params.head_size  = head_size;
+    params.head_dim   = head_size;
     params.kv_seqlen  = kv_seqlen;
 
     params.softmax_scale = softmax_scale;
@@ -64,7 +65,7 @@ mha_infer(const torch::Tensor&q,    // batch,qo_seqlen,head_num,head_size
     params.v_batch_stride = head_size * head_num * kv_seqlen;
 
     // output 
-    auto o = torch::empty_lie(q);
+    auto o = torch::empty_like(q);
 
 
     // Ptrs
@@ -73,12 +74,16 @@ mha_infer(const torch::Tensor&q,    // batch,qo_seqlen,head_num,head_size
     params.v_ptr = v.data_ptr();
     params.o_ptr = o.data_ptr();
 
-    at::cuda::CUDAGuard device_gard((char)q.device());
-    auto stream = at::cuda::getCurrentCUDAStream().strem();
+    at::cuda::CUDAGuard device_gard(q.device());
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     if(backend == "attn_infer_v1"){
-
+        LAB::CUDA::SM80::AttentionInferV1<cutlass::half_t>(params, stream);
     }
 
-    return out;
+    return o;
+}
+
+TORCH_LIBRARY_FRAGMENT(torch_lab, m){
+    m.def("mha_infer", &mha_infer);
 }

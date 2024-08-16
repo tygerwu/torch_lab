@@ -59,6 +59,7 @@ struct AttentionInferV1Config{
 
     static_assert(BN{} % BK2{} == 0, "Invalid BN");
     static_assert(HD   % BN2{} == 0, "Invalid BN2");
+    static_assert(BN2Num{} == 1, "Invalid BN2");
 
     // SMem Config
     using SMemConfigQ = HalfSMem::KMajorConfig<BK{},BM{},Threads{},T,BKNum>;                  // Pipeline along BK
@@ -192,9 +193,9 @@ struct AttentionInferV1ConfigTratis<T,128>{
     static constexpr int HD = 128;
     static constexpr int TiledMMA_ThrTile_M = 1;
     static constexpr int TiledMMA_VaTile_M  = 2;       
-    static constexpr int TiledMMA_VaTile_N  = 8;        // BN = N x 16
+    static constexpr int TiledMMA_VaTile_N  = 4;        // BN = N x 16
     static constexpr int BKTileNum  = 2;                // BK = BKTileNum x 16
-    static constexpr int BK2TileNum = 8;
+    static constexpr int BK2TileNum = 2;
     static constexpr int BN2Size = 128;
 
 

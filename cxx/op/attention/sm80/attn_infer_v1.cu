@@ -95,10 +95,10 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
 
     
     // GMem Block 
-    auto gq_block = local_tile(gq,make_shape(BM{},BK{}),make_coord(bm_id,_,head_id,batch_id)); // (BM,BK,BKNum)
-    auto go_block = local_tile(go,make_shape(BN{},BK{}),make_coord(bm_id,_,head_id,batch_id)); // ~
-    auto gk_head  = local_tile(gk,make_shape(BN{},BK{}),make_coord(_,_,head_id,batch_id));     // BN,BK,BNNum,BKNum
-    auto gv_head  = local_tile(gv,make_shape(BN2{},BK2{}),make_coord(_,_,head_id,batch_id));   // BN2,BK2,BN2Num_HD,BKNum_KVSEQ
+    auto gq_block = local_tile(gq,make_shape(BM{},BK{}),make_coord(bm_id,_,head_id,batch_id));  // (BM,BK,BKNum)
+    auto go_block = local_tile(go,make_shape(BM{},BN2{}),make_coord(bm_id,_,head_id,batch_id)); // (BM,BN2,BN2um)
+    auto gk_head  = local_tile(gk,make_shape(BN{},BK{}),make_coord(_,_,head_id,batch_id));      //  BN,BK,BNNum,BKNum
+    auto gv_head  = local_tile(gv,make_shape(BN2{},BK2{}),make_coord(_,_,head_id,batch_id));    //  BN2,BK2,BN2Num_HD,BKNum_KVSEQ
 
 
     // SMem Tensors
@@ -122,13 +122,20 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
     auto g2s_src_v = g2s_v.partition_S(gv_head);     // (8,1),G2S_ValTile_BN2,G2S_ValTile_BK2,BN2Num,BK2Num_KVSEQ
     auto g2s_dst_v = g2s_v.partition_D(sv);          // (8,1),G2S_ValTile_BN2,G2S_ValTile_BK2,BN2Num,BK2Num_BN
 
-    auto IssueG2SK = [&](int bn){
-        auto g2s_src_k_view = g2s_src_k(_,_,_,bn,_); 
-        for_each(make_int_sequence<BKNum{}>{},[&](auto bk){
-            // Do pileines along BK
-            copy(tiled_g2s_k,g2s_src_k_view(_,_,_,bk),g2s_dst_k(_,_,_,bk));
-            cp_async_fence();
-        });
+    auto IssueG2SK = [&](int bn,bool issue){
+        if(issue){
+            auto g2s_src_k_view = g2s_src_k(_,_,_,bn,_); 
+            for_each(make_int_sequence<BKNum{}>{},[&](auto bk){
+                // Do pileines along BK
+                copy(tiled_g2s_k,g2s_src_k_view(_,_,_,bk),g2s_dst_k(_,_,_,bk));
+                cp_async_fence();
+            });
+        }else{
+            // Always Execute
+            for(int i=0; i<BKNum{}; i++){
+                cp_async_fence();
+            }
+        }
     };
 
     auto IssueG2SV = [&](int bn){
@@ -140,7 +147,7 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
         });
     };
 
-
+   
     // Reg Q,K,V
     auto rq = make_tensor<T>(typename CFG::RShapeQ{});   // (2,2,2),QKMMA_ValTile_BM,2
     auto rk = make_tensor<T>(typename CFG::RShapeK{});   // (2,2),  QKMMA_ValTile_BN,2
@@ -158,6 +165,7 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
     auto s2r_dst_v         = s2r_v.retile_D(rv);         // (8,1),(S2R_ValTile_BN2),2
 
 
+
     // Reg HO
     auto rho = make_tensor<T>(typename CFG::RShapeO{});
     // R2S
@@ -165,15 +173,9 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
     auto r2s_src_ho = group_diff<1,0>(flatten(r2s_o.retile_S(rho)));   // ((2),S2RAtom_ValTile_PVMMA_M,S2RAtom_ValTile_PVMMA_N,S2R_ValTile_BM,S2R_ValTile_BN2,BN2Num
     auto r2s_dst_ho = group_diff<1,0>(flatten(r2s_o.partition_D(so))); // ~
 
-    // if(thread0()){
-    //     Print("r2s_src_ho:",r2s_src_ho);
-    //     Print("r2s_dst_ho:",r2s_dst_ho);
-    // }
-
     // S2G
     auto s2g_src_ho = s2g_o.partition_S(so);            // (8,1),S2G_ValeTile_BM,S2G_ValeTile_BN2,BN2Num
     auto s2g_dst_ho = s2g_o.partition_D(go_block);      // ~
-
 
     // Reg accumulators
     auto rfx = make_tensor<float>(typename CFG::RShapeX{});     //(2,2), QKMMA_ValTile_BM,QKMMA_ValTile_BN
@@ -205,9 +207,6 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
         }
     };
 
-    // if(thread0()){
-    //     Print("rp:",rp);
-    // }
 
     auto PV_MMA = [&](int bk2){
         for(int j=0; j<BN2Num{}; j++){
@@ -220,7 +219,7 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
 
             for(int i=0; i<BK2Tiles{}; i++){
                 if(i+1<BK2Tiles{}){
-                    copy(tiled_s2r_v,s2r_src_v(_,_,i),s2r_dst_v(_,_,st_id));
+                    copy(tiled_s2r_v,s2r_src_v(_,_,i+1),s2r_dst_v(_,_,st_id));
                     st_id ^= 1;
                 }
 
@@ -235,42 +234,41 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
     auto r_prev_sum = make_tensor<float>(typename CFG::RShapeSM{});
     auto r_prev_max = make_tensor<float>(typename CFG::RShapeSM{});
     fill(r_prev_sum,0); 
-    fill(r_prev_max,-INFINITY); 
+    fill(r_prev_max,-float(INFINITY));
+    clear(rfo);
 
     // Wait for SMem Q
     cp_async_wait<0>();
 
     // Prefetch
-    IssueG2SK(0);
+    IssueG2SK(0,true);
     for(int bn=0; bn<bn_num; bn++){
         clear(rfx);
         IssueG2SV(bn);
         // QK Gemm
         for_each(make_index_sequence<BKNum{}>{},[&](auto i){
             // Wait for K
-            cp_async_wait<BKNum{} + BK2Num{} - i - 1>();
+            cp_async_wait<BKNum{} + BK2Num{} -i - 1>();
             __syncthreads();
             QK_MMA(i);
         });
         // Prefetch K for next round
-        if(bn+1<bn_num){
-            IssueG2SK(bn+1);
-        }
+        IssueG2SK(bn+1,bn+1<bn_num);
 
         auto rfxt = make_tensor<float>(typename CFG::RSizeX{});
         TransposeX(rfx,rfxt);
- 
-        Update(rfxt,r_prev_sum,r_prev_max,rp,rfo,log2_scale);
-
+        Update<T>(rfxt,r_prev_sum,r_prev_max,rp,rfo,log2_scale);
+        
         // PV Gemm
         for_each(make_index_sequence<BK2Num{}>{},[&](auto i){
             // Wait for V
-            cp_async_wait<BKNum{} + BK2Num{} - i - 1>();
+            cp_async_wait<BKNum{} + BK2Num{} -i - 1>();
             __syncthreads();
             PV_MMA(i);
         });
-    }
 
+    }
+   
     RescaleO<T>(rfo,rho,r_prev_sum);
 
     // r2s
@@ -278,14 +276,7 @@ __global__ void AttentionInferV1Kernel(AttnInferParams params){
     __syncthreads();
     // s2g 
     copy(tiled_s2g_o,s2g_src_ho,s2g_dst_ho);
-
-    // if(thread0()){
-    //     Print("r2s_src_ho:",r2s_src_ho);
-    //     Print("r2s_dst_ho:",r2s_dst_ho);
-
-    //     Print("s2g_src_ho:",s2g_src_ho);
-    //     Print("s2g_dst_ho:",s2g_dst_ho);
-    // }
+  
 }
 
 

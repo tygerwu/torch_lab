@@ -35,7 +35,7 @@ __forceinline__ __device__ void TransposeX(const RFX& rfx,RFXT& rfxt){
 
 
 
-template<typename RFXT,typename PrevSum,typename PrevMax,typename RP,typename RFO>
+template<typename T,typename RFXT,typename PrevSum,typename PrevMax,typename RP,typename RFO>
 __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r_prev_max,RP& rp,RFO& rfo,
                                        float log2_scale){
 
@@ -51,7 +51,7 @@ __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r
     float* rfxt_ptr=rfxt.data();
     CUTE_UNROLL
     for(int i=0; i<Rows; i++){
-        float* rfxt_row_ptr=rfxt_ptr + i * Cols_P;
+        float* rfxt_row_ptr= rfxt_ptr + i * Cols_P;
         // Max
         float cur_max=-INFINITY;
         CUTE_UNROLL
@@ -94,14 +94,19 @@ __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r
 
         int atom_start =(i / 2) * 8;
         // (i % 2) * 2
-        int off_in_atom=((i & 2) << 1); 
+        int off_in_atom=((i & 1) << 1); 
 
         // Update X
         CUTE_UNROLL
         for(int j=0; j<P_MMATile_BN; j++){
-            auto rp_ptr=rp.data() + atom_start + off_in_atom + j*Rows*4;
-            (reinterpret_cast<__half2*>(rp_ptr))[0]  =__float22half2_rn((reinterpret_cast<const float2*>(rfxt_row_ptr+j*4))[0]);
-            (reinterpret_cast<__half2*>(rp_ptr+4))[0]=__float22half2_rn((reinterpret_cast<const float2*>(rfxt_row_ptr+j*4+2))[0]);
+            auto rp_ptr= rp.data() + atom_start + off_in_atom + j*Rows*4;
+            rp_ptr[0] = static_cast<T>(rfxt_row_ptr[j*4]);
+            rp_ptr[1] = static_cast<T>(rfxt_row_ptr[j*4+1]);
+            rp_ptr[4] = static_cast<T>(rfxt_row_ptr[j*4+2]);
+            rp_ptr[5] = static_cast<T>(rfxt_row_ptr[j*4+3]);
+
+            //(reinterpret_cast<__half2*>(rp_ptr))[0]  =__float22half2_rn((reinterpret_cast<const float2*>(rfxt_row_ptr+j*4))[0]);
+            //(reinterpret_cast<__half2*>(rp_ptr+4))[0]=__float22half2_rn((reinterpret_cast<const float2*>(rfxt_row_ptr+j*4+2))[0]);
         }
 
         // Update O
@@ -119,7 +124,7 @@ template<typename T,typename RFO,typename RHO,typename PrevSum>
 __forceinline__ __device__ void RescaleO(const RFO& rfo,RHO& rho,PrevSum& r_prev_sum){
     // Ex:
     //   RO: (2,2),QKMMA_ValTile_BM,QKMMA_ValTile_BN,BN2Num. Row2Major
-    constexpr int Rows=size<1>(RFO{});
+    constexpr int Rows=size<1>(RFO{}) * 2;
     constexpr int C2s =size<2>(RFO{}) * size<3>(RFO{});
 
     const float* rfo_ptr=rfo.data();
@@ -138,7 +143,7 @@ __forceinline__ __device__ void RescaleO(const RFO& rfo,RHO& rho,PrevSum& r_prev
             CUTE_UNROLL
             for(int d=0; d<2; d++){
                 int offset=j*Rows*2 + d;
-                rho_row_ptr[offset]=static_cast<__half>(rfo_row_ptr[offset] / r_gsum);
+                rho_row_ptr[offset]=static_cast<T>(rfo_row_ptr[offset] / r_gsum);
             }
         }
     }

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 include(utils)
 
-set(CUDA_ARCH "sm80" CACHE STRING "CUDA archs")
+set(CUDA_ARCH "80" CACHE STRING "CUDA archs")
 
 # cutlass args
 set(CUTLASS_ROOT ${CUTLASS_ROOT})
@@ -26,11 +26,10 @@ find_package(Torch REQUIRED)
 set(CUTLASS_INCLUDE_DIRS 
     ${CUTLASS_ROOT}/include
     ${CUTLASS_ROOT}/tools/util/include
-    ${CUTLASS_ROOT}/tools/util/third_party/cub
 )
 
 file(GLOB_RECURSE srcs 
-    ${PROJECT_SOURCE_DIR}/*.cpp
+    ${PROJECT_SOURCE_DIR}/*.cc
     ${PROJECT_SOURCE_DIR}/*.cu
 )
 
@@ -62,6 +61,9 @@ target_link_libraries(torch_lab
     ${TORCH_LIBRARIES}
 )
 
+set_target_properties(torch_lab PROPERTIES CUDA_ARCHITECTURES ${CUDA_ARCH})
+
 target_compile_options(torch_lab PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>>
+    $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+    $<$<COMPILE_LANGUAGE:CUDA>:--std=c++17>
 )
