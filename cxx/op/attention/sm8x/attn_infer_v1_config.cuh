@@ -9,7 +9,7 @@
 namespace LAB{
 namespace CUDA{
 
-namespace SM80{
+namespace SM8X{
 
 
 using namespace cute;

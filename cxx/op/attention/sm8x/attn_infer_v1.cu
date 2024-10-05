@@ -6,7 +6,7 @@
 namespace LAB{
 namespace CUDA{
 
-namespace SM80{
+namespace SM8X{
 
 
 template<typename T,int HDSize>

@@ -5,7 +5,7 @@
 namespace LAB{
 namespace CUDA{
 
-namespace SM80{
+namespace SM8X{
 
 template<typename RFX,typename RFXT>
 __forceinline__ __device__ void TransposeX(const RFX& rfx,RFXT& rfxt){
@@ -34,6 +34,34 @@ __forceinline__ __device__ void TransposeX(const RFX& rfx,RFXT& rfxt){
 }
 
 
+template<typename RFXEngine,typename RFXLayout,
+         typename RFXTEngine,typename RFXTLayout>
+__forceinline__ __device__ void RowNMajorToRowMajor(const Tensor<RFXEngine,RFXLayout>& rfx,
+                                                    Tensor<RFXTEngine,RFXTLayout>& rfxt){
+    // RFX: ((N,MMA_N),MMAValTile_BM,MMAValTile_BN)
+    constexpr int MMATile_M=get<1>(shape(RFXLayout{}));
+    constexpr int MMATile_N=get<2>(shape(RFXLayout{}));
+    constexpr int N        = get<0>(get<0>(shape(RFXLayout{})));
+    constexpr int MMA_N    = get<1>(get<0>(shape(RFXLayout{})));
+        
+    constexpr int Cols=N     * MMATile_N;
+    constexpr int Rows=MMA_N * MMATile_M; 
+
+    const float* rfx_ptr=rfx.data();
+    float* rfxt_ptr=rfxt.data();
+
+    CUTE_UNROLL
+    for(int i=0; i<Rows; i++){
+        CUTE_UNROLL
+        for(int j=0; j<Cols/N; j++){
+            CUTE_UNROLL
+            for(int d=0; d<N; d++){
+                rfxt_ptr[i*Cols + j*N + d]=rfx_ptr[i*N + j*N*Rows + d];
+            }
+        }
+    }
+
+}
 
 template<typename T,typename RFXT,typename PrevSum,typename PrevMax,typename RP,typename RFO>
 __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r_prev_max,RP& rp,RFO& rfo,
@@ -66,13 +94,13 @@ __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r
         }
         float prev_max=r_prev_max(i);
         float gmax=max(cur_max,prev_max); 
-
+        float gmax_scaled = gmax * log2_scale;
 
         float cur_sum=0;
         CUTE_UNROLL
         for(int j=0; j<Cols_P; j++){
             auto x=rfxt_row_ptr[j];
-            auto exp_x=exp2f((x - gmax) * log2_scale);
+            auto exp_x= exp2f(x*log2_scale - gmax_scaled);
             rfxt_row_ptr[j]=exp_x;
             cur_sum += exp_x;
         }
@@ -83,7 +111,7 @@ __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r
         }
 
         float prev_sum=r_prev_sum(i);
-        float prev_exp=exp2f((prev_max - gmax) * log2_scale);
+        float prev_exp=exp2f(prev_max * log2_scale - gmax_scaled);
 
         float gsum=prev_sum * prev_exp + cur_sum;
         float o_scale=prev_exp;
@@ -91,7 +119,8 @@ __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r
         // Update params 
         r_prev_sum(i)=gsum;
         r_prev_max(i)=gmax;
-
+        
+        
         int atom_start =(i / 2) * 8;
         // (i % 2) * 2
         int off_in_atom=((i & 1) << 1); 

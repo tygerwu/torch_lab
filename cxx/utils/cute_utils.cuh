@@ -33,13 +33,13 @@ void PrintIden(const char* msg,const T& obj){
 
 template<typename T>
 CUTE_HOST_DEVICE
-void PrintValue(const char* msg,const T& obj){
+void PrintValue(const char* msg,const T& obj,const char* format="%8.3f"){
     cute::print(msg);
     cute::print(obj);
     cute::print("\n");
 
     for(int i=0; i<size(obj); i++){
-       printf("%6.1f",static_cast<float>(obj(i)));
+       printf(format,static_cast<float>(obj(i)));
     }
     cute::print("\n");
 }
@@ -51,7 +51,6 @@ group_diff(const cute::Tensor<SrcEngine,SrcLayout>& tensor) {
     constexpr int R = SrcLayout::rank;
     return cute::group_modes<B,R-E>(tensor);
 }
-
 
 }
 }
