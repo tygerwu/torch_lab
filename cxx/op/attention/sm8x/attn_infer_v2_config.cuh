@@ -62,10 +62,10 @@ struct AttentionInferV2Config{
     static_assert(BN2Num{} == 1, "Invalid BN2");
 
     // SMem Config
-    using SMemConfigQ = HalfSMem::KMajorConfig<BK{},BM{},Threads{},T,BKNum>;                  // Pipeline along BK
-    using SMemConfigK = HalfSMem::KMajorConfig<BK{},BN{},Threads{},T,BKNum>;
-    using SMemConfigV = HalfSMem::MMajorConfig<BN2{},BK2{},Threads{},T,tuple<BN2Num,BK2Num>>; // Pipeline along BK2
-    using SMemConfigO = HalfSMem::KMajorConfig<BN2{},BM{},Threads{},T,BN2Num>;
+    using SMemConfigQ = SMem::KMajorConfig<BK{},BM{},Threads{},T,BKNum>;                  // Pipeline along BK
+    using SMemConfigK = SMem::KMajorConfig<BK{},BN{},Threads{},T,BKNum>;
+    using SMemConfigV = SMem::MMajorConfig<BN2{},BK2{},Threads{},T,tuple<BN2Num,BK2Num>>; // Pipeline along BK2
+    using SMemConfigO = SMem::KMajorConfig<BN2{},BM{},Threads{},T,BN2Num>;
 
     // SMem Layout
     using SMemLayoutQ = typename SMemConfigQ::SMemLayout;       // (BM,BK,BKNum)
