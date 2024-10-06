@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0.0)
 project(torch_lab VERSION 0.1.0 LANGUAGES C CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 
-
+set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -Wno-format-extra-args)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 include(utils)
 
@@ -63,7 +63,10 @@ target_link_libraries(torch_lab
 
 set_target_properties(torch_lab PROPERTIES CUDA_ARCHITECTURES ${CUDA_ARCH})
 
+
 target_compile_options(torch_lab PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
     $<$<COMPILE_LANGUAGE:CUDA>:--std=c++17>
+    -Wno-format-extra-args
+    -Wno-format-overflow
 )

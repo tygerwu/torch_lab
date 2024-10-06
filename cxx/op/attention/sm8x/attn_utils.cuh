@@ -63,6 +63,42 @@ __forceinline__ __device__ void RowNMajorToRowMajor(const Tensor<RFXEngine,RFXLa
 
 }
 
+template<bool PredN,typename PredTensor,
+         typename RFXEngine,typename RFXLayout,
+         typename RFXTEngine,typename RFXTLayout>
+__forceinline__ __device__ void TransposeFX(const Tensor<RFXEngine,RFXLayout>& rfx,
+                                            Tensor<RFXTEngine,RFXTLayout>& rfxt,const PredTensor& predn){
+                                                
+    // RFX: ((N,MMA_N),MMAValTile_BM,MMAValTile_BN)
+    constexpr int MMATile_M=get<1>(shape(RFXLayout{}));
+    constexpr int MMATile_N=get<2>(shape(RFXLayout{}));
+    constexpr int N        = get<0>(get<0>(shape(RFXLayout{})));
+    constexpr int MMA_N    = get<1>(get<0>(shape(RFXLayout{})));
+        
+    constexpr int Cols=N     * MMATile_N;
+    constexpr int Rows=MMA_N * MMATile_M; 
+
+    const float* rfx_ptr=rfx.data();
+    float* rfxt_ptr=rfxt.data();
+
+    CUTE_UNROLL
+    for(int i=0; i<Rows; i++){
+        CUTE_UNROLL
+        for(int j=0; j<Cols/N; j++){
+            CUTE_UNROLL
+            for(int d=0; d<N; d++){
+                int col_id = j*N + d;
+                if constexpr(PredN){
+                    rfxt_ptr[i*Cols + col_id] = predn(col_id) ? rfx_ptr[i*N + j*N*Rows + d] : float(-INFINITY);
+                }else{
+                    rfxt_ptr[i*Cols + col_id]=rfx_ptr[i*N + j*N*Rows + d];
+                }
+            }
+        }
+    }
+
+}
+
 template<typename T,typename RFXT,typename PrevSum,typename PrevMax,typename RP,typename RFO>
 __forceinline__ __device__ void Update(RFXT& rfxt,PrevSum& r_prev_sum,PrevMax& r_prev_max,RP& rp,RFO& rfo,
                                        float log2_scale){

@@ -124,6 +124,7 @@ struct AttentionInferV2Config{
 
 
     using RSizeX = Int<size(RShapeX{})>;
+    using XCols  = Int<get<0>(get<0>(RShapeX{})) * get<2>(RShapeX{})>;
 
 #ifndef __CUDA_ARCH__
     void print(){

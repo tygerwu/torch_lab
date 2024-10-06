@@ -45,8 +45,8 @@ def example():
     batch = 1 
     hn = 2
     hd = 128 
-    qo_seqlen = 127
-    kv_seqlen = 256
+    qo_seqlen = 140
+    kv_seqlen = 160
     profile = False
     verify = True
     run(batch,hn,hd,qo_seqlen,kv_seqlen,profile,verify)

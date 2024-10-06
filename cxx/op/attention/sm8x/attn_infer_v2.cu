@@ -26,6 +26,7 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
     using BN2Num   = typename CFG::BN2Num;
     using BKTiles  = typename CFG::BKTiles;
     using BK2Tiles = typename CFG::BK2Tiles;
+    using XCols    = typename CFG::XCols;
 
 
     extern __shared__ char smem[];
@@ -77,9 +78,13 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
     int kv_seq_stride   = params.k_seq_stride;
 
     float log2_scale    = params.log2_scale;
+    
+    // Just for compilation
+    int dummy = 0;
 
-
-    int bn_num = UP_DIV(kv_seqlen,BN{});
+    int ceil_bn_num = UP_DIV(kv_seqlen,BN{});
+    // Different in CasualMask
+    int masked_bn_num = ceil_bn_num - (kv_seqlen / BN{});
 
     // GMem Tensors
     auto gqo_layout = make_layout(make_shape(qo_seqlen,HD{},head_num,batch),
@@ -112,23 +117,20 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
 
 
     // Load Q into SMem as early as possible
-    auto g2s_src_q = g2s_q.partition_S(gq_block);   // (8,1),G2S_ValTile_BM,G2S_ValTile_BK,BKNum
-    auto g2s_dst_q = g2s_q.partition_D(sq);         // ~
-    
-    // Pred for Q along M
-    constexpr int G2S_Q_ValTile_BM = size<1>(g2s_dst_q);
-    constexpr int G2S_Q_ValTile_BK = size<2>(g2s_dst_q);
-    SMem2DCopyWithMasK<Pred2DAxis::M,G2S_Q_ValTile_BM,G2S_Q_ValTile_BK>(
-        tiled_g2s_q,g2s_src_q,g2s_dst_q,tid,qo_seqoff,qo_seqlen,0,0);
+    SMem2DCopyWithMasK<Pred2DAxis::M,false>(tiled_g2s_q,gq_block,sq,tid,qo_seqoff,qo_seqlen,0,0);
     cp_async_fence();
 
     // G2S K,V
     auto g2s_src_k = g2s_k.partition_S(gk_head);     // (8,1),G2S_ValTile_BN,G2S_ValTile_BK,bn_num,BKNum
     auto g2s_dst_k = g2s_k.partition_D(sk);          // (8,1),G2S_ValTile_BN,G2S_ValTile_BK,BKNum
+    constexpr int G2S_K_ValTile_BN = size<1>(g2s_dst_k);
+    constexpr int G2S_K_ValTile_BK = size<2>(g2s_dst_k);
 
     auto g2s_src_v = g2s_v.partition_S(gv_head);     // (8,1),G2S_ValTile_BN2,G2S_ValTile_BK2,BN2Num,BK2Num_KVSEQ
     auto g2s_dst_v = g2s_v.partition_D(sv);          // (8,1),G2S_ValTile_BN2,G2S_ValTile_BK2,BN2Num,BK2Num_BN
-
+    constexpr int G2S_V_ValTile_BN2 = size<1>(g2s_dst_v);
+    constexpr int G2S_V_ValTile_BK2 = size<2>(g2s_dst_v);
+    
     auto IssueG2SK = [&](int bn,bool issue){
         if(issue){
             auto g2s_src_k_view = g2s_src_k(_,_,_,bn,_); 
@@ -172,17 +174,12 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
     auto s2r_dst_v         = s2r_v.retile_D(rv);         // (8,1),(S2R_ValTile_BN2),2
 
 
-
     // Reg HO
     auto rho = make_tensor<T>(typename CFG::RShapeO{});
     // R2S
     //  s2r_tile_mn : (PVMMA_M,PVMMA_N), ex:64x16
     auto r2s_src_ho = group_diff<1,0>(flatten(r2s_o.retile_S(rho)));   // ((2),S2RAtom_ValTile_PVMMA_M,S2RAtom_ValTile_PVMMA_N,S2R_ValTile_BM,S2R_ValTile_BN2,BN2Num
     auto r2s_dst_ho = group_diff<1,0>(flatten(r2s_o.partition_D(so))); // ~
-
-    // S2G
-    auto s2g_src_ho = s2g_o.partition_S(so);            // (8,1),S2G_ValeTile_BM,S2G_ValeTile_BN2,BN2Num
-    auto s2g_dst_ho = s2g_o.partition_D(go_block);      // ~
 
     // Reg accumulators
     auto rfx = make_tensor<float>(typename CFG::RShapeX{});     //(2,2), QKMMA_ValTile_BM,QKMMA_ValTile_BN
@@ -214,7 +211,6 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
         }
     };
 
-
     auto PV_MMA = [&](int bk2){
         for(int j=0; j<BN2Num{}; j++){
             int st_id = 0;
@@ -236,20 +232,74 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
         }   
     };
 
-    
     // Reg softmax params
     auto r_prev_sum = make_tensor<float>(typename CFG::RShapeSM{});
     auto r_prev_max = make_tensor<float>(typename CFG::RShapeSM{});
     fill(r_prev_sum,0); 
     fill(r_prev_max,-float(INFINITY));
     clear(rfo);
-
     // Wait for SMem Q
     cp_async_wait<0>();
 
-    // Prefetch
-    IssueG2SK(0,true);
-    for(int bn=0; bn<bn_num; bn++){
+    for(int d=0; d<masked_bn_num; d++){
+        int bn = ceil_bn_num - d - 1;
+        int beg = bn * BN{};
+        // Pred for K
+        auto pred_k = make_tensor<bool>(Shape<Int<G2S_K_ValTile_BN>,Int<G2S_K_ValTile_BK>>{},Stride<_1,_0>{});
+        Fill2DPred<Pred2DAxis::M,BN{},BK{},G2S_K_ValTile_BN,G2S_K_ValTile_BK>(
+            tiled_g2s_k,pred_k,tid,beg,kv_seqlen,0,0);
+        // Submit BKNum cp_async_fence() 
+        CopyIf2D<true>(tiled_g2s_k,pred_k,g2s_src_k(_,_,_,bn,_),g2s_dst_k);
+        
+
+        // Pred for V
+        int bk2_off = bn * BK2Num{};
+        for(int i=0;i<BK2Num{};i++){
+            // pred_v shoud be consistent with the shape of  g2s_src_v:(8,1),G2S_ValTile_BN2,G2S_ValTile_BK2,~
+            auto pred_v = make_tensor<bool>(Shape<Int<G2S_V_ValTile_BN2>,Int<G2S_V_ValTile_BK2>>{},Stride<_0,_1>{});
+            Fill2DPred<Pred2DAxis::N,BN2{},BK2{},G2S_V_ValTile_BN2,G2S_V_ValTile_BK2>(
+                tiled_g2s_v,pred_v,tid,0,0,beg+i*BK2{},kv_seqlen);
+            for(int j=0;j<BN2Num{};j++){
+                copy_if(tiled_g2s_v,pred_v,g2s_src_v(_,_,_,j,bk2_off+i),g2s_dst_v(_,_,_,j,i));
+            }
+            cp_async_fence();
+        }
+
+        // Pred for X
+        auto pred_x = make_tensor<bool>(Shape<XCols>{});
+        auto iden_x = make_identity_tensor(Shape<BM,BN>{});
+        auto thr_iden_x    = tiled_qk_mma.get_slice(tid).partition_C(iden_x); // (2,2),QKMMA_ValTile_BM,QKMMA_ValTile_BN
+        auto thr_iden_x_kv = flatten(thr_iden_x)(_,_0{},_0{},_);
+        for(int i=0; i<XCols{}; i++){
+            pred_x(i) = (get<1>(thr_iden_x_kv(i)) + beg < kv_seqlen);
+        }
+        
+        clear(rfx);
+        // QK Gemm
+        for_each(make_index_sequence<BKNum{}>{},[&](auto i){
+            // Wait for K
+            cp_async_wait<BKNum{} + BK2Num{} -i - 1>();
+            __syncthreads();
+            QK_MMA(i);
+        });
+        
+        auto rfxt = make_tensor<float>(typename CFG::RSizeX{});
+        TransposeFX<true>(rfx,rfxt,pred_x);
+        Update<T>(rfxt,r_prev_sum,r_prev_max,rp,rfo,log2_scale);
+
+        // PV Gemm
+        for_each(make_index_sequence<BK2Num{}>{},[&](auto i){
+            // Wait for V
+            cp_async_wait<BK2Num{} -i - 1>();
+            __syncthreads();
+            PV_MMA(i);
+        });
+    }
+    
+    int bn_start = ceil_bn_num-masked_bn_num-1;
+    // Prefetch K for next round
+    IssueG2SK(bn_start,bn_start>=0);
+    for(int bn=bn_start; bn>=0; bn--){
         clear(rfx);
         IssueG2SV(bn);
         // QK Gemm
@@ -260,10 +310,10 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
             QK_MMA(i);
         });
         // Prefetch K for next round
-        IssueG2SK(bn+1,bn+1<bn_num);
+        IssueG2SK(bn-1,bn-1>=0);
 
         auto rfxt = make_tensor<float>(typename CFG::RSizeX{});
-        RowNMajorToRowMajor(rfx,rfxt);
+        TransposeFX<false>(rfx,rfxt,dummy);
         Update<T>(rfxt,r_prev_sum,r_prev_max,rp,rfo,log2_scale);
         
         // PV Gemm
@@ -273,21 +323,15 @@ __global__ void AttentionInferV2Kernel(AttnInferParams params){
             __syncthreads();
             PV_MMA(i);
         });
-
     }
-   
     RescaleO<T>(rfo,rho,r_prev_sum);
 
     // r2s
     copy(tiled_r2s_o,r2s_src_ho,r2s_dst_ho);
     __syncthreads();
     
-
     // S2G
-    constexpr int G2S_O_ValTile_BM = size<1>(s2g_src_ho);
-    constexpr int G2S_O_ValTile_BN = size<2>(s2g_dst_ho);
-    SMem2DCopyWithMasK<Pred2DAxis::M,G2S_O_ValTile_BM,G2S_O_ValTile_BN>(
-        tiled_s2g_o,s2g_src_ho,s2g_dst_ho,tid,qo_seqoff,qo_seqlen,0,0);
+    SMem2DCopyWithMasK<Pred2DAxis::M,false>(tiled_s2g_o,so,go_block,tid,qo_seqoff,qo_seqlen,0,0);
 }
 
 
