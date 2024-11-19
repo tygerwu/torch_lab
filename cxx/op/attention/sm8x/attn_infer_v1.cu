@@ -304,6 +304,7 @@ static void Launch(const AttnInferParams& params,cudaStream_t stream){
     dim3 block(threads);
 
     func<<<grid,block,smem_bytes,stream>>>(params);
+    CHECK_CUDA_KERNEL_LAUNCH();
 
 }
 
