@@ -32,3 +32,5 @@
             exit(1);                                                    \
         }                                                               \
     } while (0)
+
+#define CHECK_CUDA_KERNEL_LAUNCH() CUDA_ERROR_CHECK(cudaGetLastError())
