@@ -30,7 +30,7 @@ struct Pred2DStrideTrait<M, N, Pred2DAxis::MN> {
     using Stride = Stride<_1, Int<M>>;
 };
 
-// G2S or S2G with Mask
+// Fill a 2D pred for SMem or GMem Copy
 template <Pred2DAxis PredAxis, int SM, int SN, int ThrPredM, int ThrPredN, typename TiledCopy, typename PredTensor>
 CUTE_DEVICE void Fill2DPred(
     const TiledCopy& tiled_copy, PredTensor& thr_pred, int slice_id, int m_beg, int m_end, int n_beg, int n_end) {
@@ -78,9 +78,10 @@ CUTE_HOST_DEVICE void CopyIf2D(const TiledCopy&                          tiled_c
     constexpr int SrcRank = rank(ThrSrcLayout{});
     constexpr int DstRank = rank(ThrDstLayout{});
     if constexpr (SrcRank > 3 && DstRank > 3) {
-        auto          thr_src_view = group_modes<3, SrcRank>(thr_src);
-        auto          thr_dst_view = group_modes<3, DstRank>(thr_dst);
-        constexpr int num          = size<3>(group<3, SrcRank>(ThrSrcLayout{}));
+        auto thr_src_view = group_modes<3, SrcRank>(thr_src);
+        auto thr_dst_view = group_modes<3, DstRank>(thr_dst);
+
+        constexpr int num = size<3>(group<3, SrcRank>(ThrSrcLayout{}));
         CUTE_UNROLL
         for (int i = 0; i < num; i++) {
             copy_if(tiled_copy, thr_pred, thr_src_view(_, _, _, i), thr_dst_view(_, _, _, i));

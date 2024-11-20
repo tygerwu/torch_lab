@@ -15,13 +15,13 @@ namespace SM8X{
 using namespace cute;
 
 /**
- *  Do pipelines along K 
+ *  Half,Add Predication along QO,KV Seqlen
  */
 
 template<typename T,int HD,
          int TiledMMA_ThrTile_M,int TiledMMA_VaTile_M,int TiledMMA_VaTile_N,   
          int BKTileNum,int BK2TileNum,int BN2Size>
-struct AttentionInferV1Config{
+struct AttentionInferV2Config{
 
     using M_T = Int<int(4 * TiledMMA_ThrTile_M)>;
     using N_T = _1;
@@ -124,6 +124,7 @@ struct AttentionInferV1Config{
 
 
     using RSizeX = Int<size(RShapeX{})>;
+    using XCols  = Int<get<0>(get<0>(RShapeX{})) * get<2>(RShapeX{})>;
 
 #ifndef __CUDA_ARCH__
     void print(){
@@ -168,13 +169,13 @@ struct AttentionInferV1Config{
 
 
 template<typename T,int HD>
-struct AttentionInferV1ConfigTratis{
+struct AttentionInferV2ConfigTratis{
     static_assert("Invalid HD");
 };
 
 
 template<typename T>
-struct AttentionInferV1ConfigTratis<T,64>{
+struct AttentionInferV2ConfigTratis<T,64>{
     static constexpr int HD = 64;
     static constexpr int TiledMMA_ThrTile_M = 1;
     static constexpr int TiledMMA_VaTile_M  = 2;       
@@ -184,12 +185,12 @@ struct AttentionInferV1ConfigTratis<T,64>{
     static constexpr int BN2Size = 64;
 
 
-    using CFG = AttentionInferV1Config<T,HD,TiledMMA_ThrTile_M,TiledMMA_VaTile_M,TiledMMA_VaTile_N,BKTileNum,BK2TileNum,BN2Size>;
+    using CFG = AttentionInferV2Config<T,HD,TiledMMA_ThrTile_M,TiledMMA_VaTile_M,TiledMMA_VaTile_N,BKTileNum,BK2TileNum,BN2Size>;
 };
 
 
 template<typename T>
-struct AttentionInferV1ConfigTratis<T,128>{
+struct AttentionInferV2ConfigTratis<T,128>{
     static constexpr int HD = 128;
     static constexpr int TiledMMA_ThrTile_M = 1;
     static constexpr int TiledMMA_VaTile_M  = 2;       
@@ -199,7 +200,7 @@ struct AttentionInferV1ConfigTratis<T,128>{
     static constexpr int BN2Size = 128;
 
 
-    using CFG = AttentionInferV1Config<T,HD,TiledMMA_ThrTile_M,TiledMMA_VaTile_M,TiledMMA_VaTile_N,BKTileNum,BK2TileNum,BN2Size>;
+    using CFG = AttentionInferV2Config<T,HD,TiledMMA_ThrTile_M,TiledMMA_VaTile_M,TiledMMA_VaTile_N,BKTileNum,BK2TileNum,BN2Size>;
 };
 
 

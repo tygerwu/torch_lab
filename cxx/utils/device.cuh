@@ -1,7 +1,6 @@
 #pragma once
 #include <cuda_runtime.h>
-#include "utils.cuh"
-
+#include "macro.cuh"
 
 static void PrintDeviceInfo(){
     int32_t device{};
@@ -28,4 +27,33 @@ static void PrintDeviceInfo(){
     std::cout << "Max Thread Dimensions: " << prop.maxThreadsDim[0] << ", " << prop.maxThreadsDim[1] << ", " << prop.maxThreadsDim[2] << std::endl;
     std::cout << "Max Grid Dimensions: " << prop.maxGridSize[0] << ", " << prop.maxGridSize[1] << ", " << prop.maxGridSize[2] << std::endl;
 
+}
+
+static const cudaDeviceProp& GetCudaDeviceProp(){
+    static cudaDeviceProp prop;
+    static bool created = false;
+    if(!created){
+        int32_t device = 0;
+        CUDA_ERROR_CHECK(cudaGetDevice(&device));
+        CUDA_ERROR_CHECK(cudaGetDeviceProperties(&prop, device));
+        created = true;
+    }
+    return prop;
+}
+
+// Helper Functions
+static int GetMaxThreadsPerSM(){
+    return GetCudaDeviceProp().maxThreadsPerMultiProcessor;
+}
+
+static int GetMaxBlocksPerSM(){
+    return GetCudaDeviceProp().maxBlocksPerMultiProcessor;
+}
+
+static int GetMaxThreadsPerBlock(){
+    return GetCudaDeviceProp().maxThreadsPerBlock;
+}
+
+static int GetSMNum(){
+    return GetCudaDeviceProp().multiProcessorCount;
 }
