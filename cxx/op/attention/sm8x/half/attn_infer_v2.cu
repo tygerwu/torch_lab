@@ -1,7 +1,7 @@
 #include "attn_infer_v2_config.cuh"
-#include "op/attention/params.cuh"
-#include "op/attention/api.cuh"
-#include "attn_utils.cuh"
+#include "attention/params.cuh"
+#include "attention/api.cuh"
+#include "attention/sm8x/attn_utils.cuh"
 #include "utils/cute_pred_utils.cuh"
 
 namespace LAB{

@@ -1,7 +1,7 @@
 #include "attn_infer_v1_config.cuh"
 #include "op/attention/params.cuh"
 #include "op/attention/api.cuh"
-#include "attn_utils.cuh"
+#include "attention/sm8x/attn_utils.cuh"
 
 namespace LAB{
 namespace CUDA{

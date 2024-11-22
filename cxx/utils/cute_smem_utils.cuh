@@ -85,7 +85,7 @@ struct SMemLayoutAtomTrait<4, 32, LogicalLayoutAtom> {
 
 template <typename LogicalLayoutAtom>
 struct SMemLayoutAtomTrait<4, 64, LogicalLayoutAtom> {
-    using SMemLayoutAtom = decltype(composition(Swizzle<4, 2, 4g>{}, LogicalLayoutAtom{}));
+    using SMemLayoutAtom = decltype(composition(Swizzle<4, 2, 4>{}, LogicalLayoutAtom{}));
 };
 
 
