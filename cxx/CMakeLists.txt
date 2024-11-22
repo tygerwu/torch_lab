@@ -6,6 +6,9 @@ set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} -Wno-format-extra-args)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 include(utils)
 
+# options
+option(ENABLE_FP8,"Enable Fp8 over SM89" OFF)
+
 set(CUDA_ARCH "80" CACHE STRING "CUDA archs")
 
 # cutlass args
@@ -28,6 +31,14 @@ set(CUTLASS_INCLUDE_DIRS
     ${CUTLASS_ROOT}/tools/util/include
 )
 
+
+# definitions
+if(ENABLE_FP8)
+    add_compile_definitions(LAB_ENABLE_FP8)
+endif()
+
+
+
 file(GLOB_RECURSE srcs 
     ${PROJECT_SOURCE_DIR}/*.cc
     ${PROJECT_SOURCE_DIR}/*.cu
@@ -39,6 +50,7 @@ target_include_directories(torch_lab PRIVATE
     ${TORCH_INCLUDE_DIRS}
     ${CUTLASS_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/op
 )
 
 target_link_libraries(torch_lab 
